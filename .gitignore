@@ -1,0 +1,6 @@
+# 运行产物（含个人找房数据，不入库）
+reports/
+data/
+
+__pycache__/
+*.pyc
