@@ -39,7 +39,8 @@ def _dedup(listings):
 
 
 def run(city, price_min=0, price_max=0, districts=None, rent_type="",
-        cookie="", owner_only=False, max_pages=2, out_dir=None, quiet=False):
+        cookie="", owner_only=False, max_pages=2, out_dir=None, quiet=False,
+        fang_cookie=""):
     """端到端执行，返回 (报告路径, listings, 统计)。"""
     slug = cities.resolve_city(city)
     if not slug:
@@ -55,7 +56,7 @@ def run(city, price_min=0, price_max=0, districts=None, rent_type="",
 
     all_l, source_stats, failed = [], {}, []
     scrapers = [
-        ("房天下", FangScraper(), dict(max_pages=max_pages, owner_only=owner_only)),
+        ("房天下", FangScraper(cookie=fang_cookie), dict(max_pages=max_pages, owner_only=owner_only)),
         ("贝壳", BeikeScraper(cookie=cookie), dict(max_pages=3 if cookie else 1)),
         ("安居客", AnjukeScraper(), {}),
         ("58同城", WB58Scraper(), {}),

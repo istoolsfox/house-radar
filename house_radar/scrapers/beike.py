@@ -18,7 +18,7 @@ URL 规律（2026-09 实测）：
 import re
 from urllib.parse import urljoin
 
-from .base import get_html, new_session, clean_ws
+from .base import get_html, new_session, clean_ws, warm_up, polite, parse_cookie_string
 from ..models import Listing, ScrapeResult
 
 PRICE_BANDS = [
@@ -30,13 +30,7 @@ RENT_SEG = {"整租": "rt200600000001", "合租": "rt200600000002"}
 
 
 def _parse_cookie_string(s: str) -> dict:
-    """'k1=v1; k2=v2' -> dict"""
-    out = {}
-    for part in (s or "").split(";"):
-        if "=" in part:
-            k, _, v = part.strip().partition("=")
-            out[k.strip()] = v.strip()
-    return out
+    return parse_cookie_string(s)
 
 
 def fetch_districts(city_slug: str) -> dict:
@@ -219,13 +213,17 @@ class BeikeScraper:
 
         all_l, seen = [], set()
         total = 0
+        if not self.cookie:
+            warm_up(s, f"{base}/zufang/")      # 匿名先逛首页再抓，更像真人
         for ui, u in enumerate(urls):
             for page in range(1, max_pages + 1):
                 if ui == 0 and page == 1 and first_html:
                     html = first_html              # 复用探测请求，省一次抓取
                 else:
                     pu = u if page == 1 else u.rstrip("/") + f"/pg{page}/"
-                    html = get_html(s, pu, mark="content__list")
+                    html = get_html(s, pu, mark="content__list",
+                                    referer=f"{base}/zufang/")
+                    polite()
                 if not html:
                     break
                 m_total = re.search(r'data-total="(\d+)"', html)

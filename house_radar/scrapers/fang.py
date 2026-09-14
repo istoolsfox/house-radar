@@ -13,16 +13,19 @@ URL 规律（2026-09 实测，服务器对段顺序宽容、/ 与 - 分隔可混
 import re
 from urllib.parse import urljoin
 
-from .base import get_html, new_session, clean_ws
+from .base import get_html, new_session, clean_ws, warm_up, polite, parse_cookie_string
 from ..models import Listing, ScrapeResult
 
 
-def fetch_districts(city_slug: str) -> dict:
+def fetch_districts(city_slug: str, cookie: str = "") -> dict:
     """解析城市页"区域"导航，返回 {区中文名: a代码}。
 
     导航形如 <a href="/cd/house-a016749/">高新</a>，区代码在 house- / hezu- 连字符后。
+    触发过滑块验证的 IP 需带入验证 cookie 才能拿到完整城市页。
     """
     s = new_session()
+    if cookie:
+        s.cookies.update(parse_cookie_string(cookie))
     html = get_html(s, f"https://zu.fang.com/{city_slug}/house/", mark="house")
     out = {}
     if html:
@@ -96,17 +99,19 @@ def _parse_listing_page(html: str, base: str) -> list:
                 elif ("朝" in p or p.strip() in ("南北", "东西", "南", "北", "东", "西")):
                     orientation = p.strip().replace("朝", "")
 
-        # 区域行：区-商圈-小区
+        # 区域行：区-商圈-小区。区名常为链接外裸文本（高新-<a>商圈</a>-<a>小区</a>），
+        # 剥标签后按 - 切分比抓 span 更稳，三种段数格式统一处理
         m_loc = re.search(r'class="gray6[^"]*"[^>]*>(.*?)</p>', seg, re.S)
         district = bizarea = community = ""
         if m_loc:
-            names = re.findall(r"<span>([^<]+)</span>", m_loc.group(1))
-            if len(names) >= 3:
-                district, bizarea, community = names[0], names[1], names[2]
-            elif len(names) == 2:
-                district, bizarea = names
-            elif len(names) == 1:
-                district = names[0]
+            plain = re.sub(r"<[^>]+>", "", m_loc.group(1))
+            parts = [p.strip() for p in plain.split("-") if p.strip()]
+            if len(parts) >= 3:
+                district, bizarea, community = parts[0], parts[1], parts[2]
+            elif len(parts) == 2:
+                district, bizarea = parts
+            elif len(parts) == 1:
+                district = parts[0]
 
         direct = 'class="smrz"' in seg           # 业主直租
         verified = "未经政府平台权属核验" not in seg and "icon_hy" in seg
@@ -131,10 +136,17 @@ def _parse_listing_page(html: str, base: str) -> list:
 class FangScraper:
     name = "房天下"
 
+    def __init__(self, cookie: str = ""):
+        # 触发滑块验证后，浏览器人工通过验证拿到的 cookie 可复用解封
+        # （global_cookie / unique_cookie 为关键设备凭证）
+        self.cookie = cookie
+
     def search(self, city_slug: str, price_min: int = 0, price_max: int = 0,
                districts: list = None, rent_type: str = "", max_pages: int = 3,
                owner_only: bool = False) -> ScrapeResult:
         s = new_session()
+        if self.cookie:
+            s.cookies.update(parse_cookie_string(self.cookie))
         # 合租走独立频道 /{slug}/hezu/，整租用 n31 段
         channel = "hezu" if rent_type == "合租" else "house"
         base = f"https://zu.fang.com/{city_slug}/{channel}/"
@@ -151,7 +163,7 @@ class FangScraper:
         # 区域：把用户给的区名匹配到房天下的 a 代码；匹配不到就留在列表里交由本地过滤
         dist_codes = []
         unmatched = []
-        all_d = fetch_districts(city_slug) if districts else {}
+        all_d = fetch_districts(city_slug, cookie=self.cookie) if districts else {}
         for d in (districts or []):
             code = match_district(d, all_d)
             if code:
@@ -172,8 +184,10 @@ class FangScraper:
 
         all_l, seen, total = [], set(), 0
         wall = False
+        warm_up(s, f"https://zu.fang.com/{city_slug}/house/")   # 会话预热拿 cookie
         for u in urls:
-            html = get_html(s, u, mark="chuzu")
+            html = get_html(s, u, mark="chuzu", referer=f"https://zu.fang.com/{city_slug}/house/")
+            polite()
             if not html:
                 continue
             m_total = re.search(r'共找到.*?(\d+).*?套', html) or re.search(r'"total":\s*(\d+)', html)

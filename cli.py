@@ -16,6 +16,7 @@ if sys.stdout and hasattr(sys.stdout, "buffer") and \
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from house_radar import cities
+from house_radar.scrapers import base
 from house_radar.pipeline import run
 
 
@@ -67,9 +68,16 @@ def main():
     ap.add_argument("-r", "--rent-type", choices=["整租", "合租"], default="")
     ap.add_argument("--owner-only", action="store_true", help="仅个人/业主直租（房天下支持）")
     ap.add_argument("--cookie", default="", help="贝壳登录 Cookie（可选，解锁筛选/翻页全量）")
+    ap.add_argument("--fang-cookie", default="", dest="fang_cookie",
+                    help="房天下 Cookie（触发滑块验证后，浏览器人工通过验证再复制的 Cookie）")
     ap.add_argument("--pages", type=int, default=2, help="房天下每个区域抓取页数（默认2）")
+    ap.add_argument("--proxy", default=os.environ.get("RADAR_PROXY", ""),
+                    help="HTTP/SOCKS5 代理（如 http://127.0.0.1:7890），IP 被平台限流时用")
     ap.add_argument("--open", action="store_true", help="生成后自动用浏览器打开报告")
     args = ap.parse_args()
+
+    if args.proxy:
+        base.set_proxy(args.proxy)
 
     interactive = not args.city
     if interactive:
@@ -84,7 +92,8 @@ def main():
     out_path, listings, stats = run(
         args.city, price_min=pmin, price_max=pmax,
         districts=args.districts or [], rent_type=args.rent_type or "",
-        cookie=args.cookie, owner_only=args.owner_only, max_pages=args.pages)
+        cookie=args.cookie, owner_only=args.owner_only, max_pages=args.pages,
+        fang_cookie=args.fang_cookie)
 
     print()
     print("=" * 46)
