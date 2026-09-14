@@ -56,7 +56,7 @@ def run(city, price_min=0, price_max=0, districts=None, rent_type="",
     all_l, source_stats, failed = [], {}, []
     scrapers = [
         ("房天下", FangScraper(), dict(max_pages=max_pages, owner_only=owner_only)),
-        ("贝壳", BeikeScraper(cookie=cookie), dict(max_pages=2 if cookie else 1)),
+        ("贝壳", BeikeScraper(cookie=cookie), dict(max_pages=3 if cookie else 1)),
         ("安居客", AnjukeScraper(), {}),
         ("58同城", WB58Scraper(), {}),
     ]

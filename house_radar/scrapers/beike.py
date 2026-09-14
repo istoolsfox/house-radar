@@ -1,14 +1,32 @@
 # -*- coding: utf-8 -*-
-"""贝壳租房抓取器（zu.ke.com）。
+"""贝壳租房抓取器（{city}.zu.ke.com）。
 
-匿名状态只能拿首页约 30 条（筛选/翻页强制登录）；
-用户在 --cookie 里提供浏览器登录态后，解锁区域/价格/翻页全量能力。
+URL 规律（2026-09 实测）：
+  城市首页   https://{slug}.zu.ke.com/zufang/          （匿名仅此页，约30条全城推荐）
+  区域页     https://{slug}.zu.ke.com/zufang/{区slug}/  （需登录；区slug 无规律，
+              如 xiaoshanqu / xihuqu4，必须从首页"按区域"导航解析，不能拼接）
+  筛选段     整租 rt200600000001 / 合租 rt200600000002
+              价格 rp1≤1000 rp2=1000-1500 rp3=1500-2000 rp4=2000-2500
+                   rp5=2500-3500 rp6=3500-5000 rp7=5000-10000 rp8≥10000
+              组合：/zufang/{区slug}/rt200600000001rp2/  段顺序宽容
+  分页       追加 /pg{n}/
+注意：
+  - ?brp=&erp= 查询参数服务端不认（静默忽略），必须用 rp 路径段；
+  - 匿名访问区域页会 302 到 clogin.ke.com，据此快速判定登录态失效；
+  - 个人公寓房源 data-house_code 可能是纯数字且无详情链接，解析时容忍。
 """
 import re
 from urllib.parse import urljoin
 
 from .base import get_html, new_session, clean_ws
 from ..models import Listing, ScrapeResult
+
+PRICE_BANDS = [
+    (0, 1000, "rp1"), (1000, 1500, "rp2"), (1500, 2000, "rp3"),
+    (2000, 2500, "rp4"), (2500, 3500, "rp5"), (3500, 5000, "rp6"),
+    (5000, 10000, "rp7"), (10000, 10 ** 9, "rp8"),
+]
+RENT_SEG = {"整租": "rt200600000001", "合租": "rt200600000002"}
 
 
 def _parse_cookie_string(s: str) -> dict:
@@ -19,6 +37,52 @@ def _parse_cookie_string(s: str) -> dict:
             k, _, v = part.strip().partition("=")
             out[k.strip()] = v.strip()
     return out
+
+
+def fetch_districts(city_slug: str) -> dict:
+    """解析城市首页"按区域"导航，返回 {区中文名: 区slug}。
+
+    区slug 无统一规律（xihuqu4 / xiaoshanqu），只能解析获得。
+    """
+    s = new_session()
+    html = get_html(s, f"https://{city_slug}.zu.ke.com/zufang/", mark="content__list")
+    out = {}
+    if not html:
+        return out
+    for slug, name in re.findall(
+            r'href="/zufang/([a-z0-9]+)/"[^>]*>([^<]{2,10})<', html):
+        name = clean_ws(name)
+        # 真区域是"XX区/市/县"(2-4字)；品牌公寓(X X社区)和小区名同样以区结尾，靠长度排除
+        if not re.search(r"(区|市|县)$", name) or not (2 <= len(name) - 1 <= 4) \
+                or name in ("不限",):
+            continue
+        if name not in out:
+            out[name] = slug
+    return out
+
+
+def match_district(name: str, all_d: dict) -> str:
+    """用户区名 → 区slug。精确 > 前缀 > 包含。"""
+    if name in all_d:
+        return all_d[name]
+    for n, slug in all_d.items():
+        if n.startswith(name):
+            return slug
+    for n, slug in all_d.items():
+        if name.startswith(n):
+            return slug
+    for n, slug in all_d.items():
+        if name in n or n in name:
+            return slug
+    return ""
+
+
+def _price_segments(pmin: int, pmax: int) -> list:
+    """用户区间覆盖到的 rp 价格段代码。"""
+    if not pmin and not pmax:
+        return []
+    segs = [code for lo, hi, code in PRICE_BANDS if hi > pmin and lo < pmax]
+    return segs or [PRICE_BANDS[-1][2]]
 
 
 def _parse_listing_page(html: str, base: str) -> list:
@@ -105,33 +169,63 @@ class BeikeScraper:
                districts: list = None, rent_type: str = "", max_pages: int = 3) -> ScrapeResult:
         """抓取贝壳租房。
 
-        匿名：仅首页。带 cookie：支持价格(brp/erp query)+区域(slug)+分页(pg)。
+        匿名：仅城市首页（约30条全城推荐，区域/筛选强制登录）。
+        带 cookie：区域页 + rt/rp 筛选段 + /pg{n}/ 翻页全量；登录失效立即报错不空耗。
         """
         s = new_session()
         if self.cookie:
             s.cookies.update(_parse_cookie_string(self.cookie))
         base = f"https://{city_slug}.zu.ke.com"
+        rent_seg = RENT_SEG.get(rent_type, "")
+        rp_segs = _price_segments(price_min, price_max)
 
-        # 匿名仅首页可用；带 cookie 走 rs 区名搜索 + brp/erp 价格筛选，均可 /pg{n}/ 翻页
-        q = []
-        if price_min:
-            q.append(f"brp={price_min}")
-        if price_max:
-            q.append(f"erp={price_max}")
-        qs = ("?" + "&".join(q)) if q else ""
-        if self.cookie:
-            urls = [f"{base}/zufang/rs{d}/{qs}" for d in (districts or [])] \
-                or [f"{base}/zufang/{qs}"]
-        else:
+        if not self.cookie:
             urls = [f"{base}/zufang/"]
+        else:
+            all_d = fetch_districts(city_slug)
+            slugs, unmatched = [], []
+            for d in (districts or []):
+                slug = match_district(d, all_d)
+                if slug:
+                    slugs.append(slug)
+                else:
+                    unmatched.append(d)
+            if not slugs:
+                slugs = [""]                       # 无有效区名 → 城市级筛选
+            urls = []
+            for slug in slugs:
+                for rp in (rp_segs or [""]):
+                    seg = rent_seg + rp
+                    path = f"/zufang/{slug}/" if slug else "/zufang/"
+                    urls.append(base + path + seg + "/" if seg else base + path)
+
+        # 登录态快速判定：失效 cookie 访问纯首页仍会拿到匿名内容（不跳登录），
+        # 必须用带筛选段的金丝雀 URL 才能触发 clogin 302
+        if self.cookie and urls:
+            canary = urls[0]
+            if canary.rstrip("/").endswith("/zufang"):
+                canary = f"{base}/zufang/rt200600000001rp1/"
+            try:
+                probe = s.get(canary, timeout=20, allow_redirects=True)
+                if "clogin" in str(probe.url):
+                    return ScrapeResult(city=city_slug, platform=self.name, listings=[],
+                                        ok=False, blocked=True,
+                                        message="贝壳登录 Cookie 已失效，请重新复制（F12 → Network → Cookie）")
+                first_html = probe.text if canary == urls[0] and "content__list" in probe.text else ""
+            except Exception:
+                first_html = ""
+        else:
+            first_html = ""
 
         all_l, seen = [], set()
         total = 0
-        for u in urls:
+        for ui, u in enumerate(urls):
             for page in range(1, max_pages + 1):
-                # 匿名仅首页可用；带 cookie 时 rs 搜索路径可加 /pg{n}/ 翻页
-                pu = u if page == 1 else u.rstrip("/") + f"/pg{page}/"
-                html = get_html(s, pu, mark="content__list")
+                if ui == 0 and page == 1 and first_html:
+                    html = first_html              # 复用探测请求，省一次抓取
+                else:
+                    pu = u if page == 1 else u.rstrip("/") + f"/pg{page}/"
+                    html = get_html(s, pu, mark="content__list")
                 if not html:
                     break
                 m_total = re.search(r'data-total="(\d+)"', html)
@@ -142,14 +236,26 @@ class BeikeScraper:
                     break
                 new = 0
                 for it in items:
-                    if it.url not in seen:
+                    if it.url and it.url not in seen:
                         seen.add(it.url)
                         all_l.append(it)
                         new += 1
                 if new == 0:
                     break
 
+        # 精确价格兜底：rp 段只到 500 档，边界内再本地精滤
+        if price_min:
+            all_l = [x for x in all_l if x.price >= price_min]
+        if price_max:
+            all_l = [x for x in all_l if x.price <= price_max]
+
+        if all_l:
+            msg = ""
+            if self.cookie and (districts or []) and len(all_l) < 5:
+                msg = "结果偏少，可放宽价格段或去掉区域试试"
+        elif self.cookie:
+            msg = "贝壳带 Cookie 未取到数据：Cookie 可能过期，或该区域/价格段无房源"
+        else:
+            msg = "贝壳匿名状态仅能获取首页推荐，建议提供登录 Cookie 以解锁区域+筛选全量"
         return ScrapeResult(city=city_slug, platform=self.name, listings=all_l,
-                            total_on_site=total,
-                            ok=len(all_l) > 0,
-                            message="" if all_l else "贝壳匿名状态仅能获取首页，建议提供登录 Cookie 以解锁全量")
+                            total_on_site=total, ok=len(all_l) > 0, message=msg)
