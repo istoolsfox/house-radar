@@ -69,14 +69,9 @@ class AnjukeScraper:
                districts: list = None, max_pages: int = 1, **kw) -> ScrapeResult:
         s = new_session()
         root = f"https://{city_slug}.zu.anjuke.com"
-        segs = []
+        # 只拼价格段；区域为拼音体系且无可靠映射，交给本地过滤
         zj = _price_segments(price_min, price_max)
-        if zj and len(zj) <= 2:          # 段太多时 URL 组合复杂，交给本地过滤
-            segs.extend(zj)
-        if districts:
-            import urllib.parse
-            segs.append("g" + urllib.parse.quote(districts[0]))  # 安居客区域为拼音，兜底由本地过滤
-        path = "/fangyuan/" + ("/".join(segs) + "/" if segs else "")
+        path = "/fangyuan/" + ("/".join(zj) + "/" if zj else "")
         all_l, seen = [], set()
         for page in range(1, max_pages + 1):
             u = root + (path if page == 1 else path.rstrip("/") + f"/p{page}/")
@@ -90,6 +85,15 @@ class AnjukeScraper:
                 if it.url not in seen:
                     seen.add(it.url)
                     all_l.append(it)
+        # 区分"无数据"与"IP 反爬"，后者提示可行动
+        blocked = False
+        if not all_l:
+            try:
+                probe = s.get(root + "/fangyuan/", timeout=15, allow_redirects=True)
+                if "antibot" in str(probe.url) or "访问过于频繁" in probe.text:
+                    blocked = True
+            except Exception:
+                pass
         # 本地精确过滤
         if price_min:
             all_l = [x for x in all_l if x.price >= price_min]
@@ -99,6 +103,9 @@ class AnjukeScraper:
             all_l = [x for x in all_l
                      if any(d and (d in x.district + x.bizarea or x.district in d)
                             for d in districts)]
+        msg = ""
+        if not all_l:
+            msg = ("安居客 IP 反爬验证（需换 IP/代理），已跳过该源" if blocked
+                   else "安居客触发反爬软墙（正常现象，已跳过该源）")
         return ScrapeResult(city=city_slug, platform=self.name, listings=all_l,
-                            ok=len(all_l) > 0,
-                            message="" if all_l else "安居客触发反爬软墙（正常现象，已跳过该源）")
+                            ok=len(all_l) > 0, blocked=blocked, message=msg)

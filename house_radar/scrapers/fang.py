@@ -17,6 +17,18 @@ from .base import get_html, new_session, clean_ws, warm_up, polite, parse_cookie
 from ..models import Listing, ScrapeResult
 
 
+def _parse_district_nav(html: str, city_slug: str) -> dict:
+    """解析城市页"区域"导航 HTML → {区中文名: a代码}（纯函数，可离线测试）。"""
+    out = {}
+    for code, name in re.findall(
+            r'href="(?:https?://zu\.fang\.com)?/' + city_slug +
+            r'/(?:house|hezu)-(a\d+)/"[^>]*>([^<]{1,12})</a>', html):
+        name = clean_ws(name)
+        if name and name not in ("不限", "全部房源") and code not in out:
+            out[name] = code
+    return out
+
+
 def fetch_districts(city_slug: str, cookie: str = "") -> dict:
     """解析城市页"区域"导航，返回 {区中文名: a代码}。
 
@@ -27,15 +39,7 @@ def fetch_districts(city_slug: str, cookie: str = "") -> dict:
     if cookie:
         s.cookies.update(parse_cookie_string(cookie))
     html = get_html(s, f"https://zu.fang.com/{city_slug}/house/", mark="house")
-    out = {}
-    if html:
-        for code, name in re.findall(
-                r'href="(?:https?://zu\.fang\.com)?/' + city_slug +
-                r'/(?:house|hezu)-(a\d+)/"[^>]*>([^<]{1,12})</a>', html):
-            name = clean_ws(name)
-            if name and name not in ("不限", "全部房源") and code not in out:
-                out[name] = code
-    return out
+    return _parse_district_nav(html, city_slug) if html else {}
 
 
 def match_district(name: str, all_d: dict) -> str:
@@ -133,6 +137,14 @@ def _parse_listing_page(html: str, base: str) -> list:
     return listings
 
 
+def mark_owner_direct(listings: list) -> list:
+    """a21(个人房源)列表页不带"业主直租"徽章，主动补标签让评分吃到直租加分。"""
+    for it in listings:
+        if "业主直租" not in (it.tags or []):
+            it.tags.append("业主直租")
+    return listings
+
+
 class FangScraper:
     name = "房天下"
 
@@ -212,9 +224,7 @@ class FangScraper:
 
         # a21(个人房源)列表页不带"业主直租"徽章，主动补标签让评分吃到直租加分
         if owner_only:
-            for it in all_l:
-                if "业主直租" not in (it.tags or []):
-                    it.tags.append("业主直租")
+            mark_owner_direct(all_l)
 
         if all_l and unmatched:
             msg = f"区 {'、'.join(unmatched)} 未匹配到房天下代码，已按全城抓取待本地过滤"

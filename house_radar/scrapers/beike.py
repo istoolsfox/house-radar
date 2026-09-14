@@ -33,16 +33,9 @@ def _parse_cookie_string(s: str) -> dict:
     return parse_cookie_string(s)
 
 
-def fetch_districts(city_slug: str) -> dict:
-    """解析城市首页"按区域"导航，返回 {区中文名: 区slug}。
-
-    区slug 无统一规律（xihuqu4 / xiaoshanqu），只能解析获得。
-    """
-    s = new_session()
-    html = get_html(s, f"https://{city_slug}.zu.ke.com/zufang/", mark="content__list")
+def _parse_district_nav(html: str) -> dict:
+    """解析首页"按区域"导航 HTML → {区中文名: 区slug}（纯函数，可离线测试）。"""
     out = {}
-    if not html:
-        return out
     for slug, name in re.findall(
             r'href="/zufang/([a-z0-9]+)/"[^>]*>([^<]{2,10})<', html):
         name = clean_ws(name)
@@ -53,6 +46,16 @@ def fetch_districts(city_slug: str) -> dict:
         if name not in out:
             out[name] = slug
     return out
+
+
+def fetch_districts(city_slug: str) -> dict:
+    """解析城市首页"按区域"导航，返回 {区中文名: 区slug}。
+
+    区slug 无统一规律（xihuqu4 / xiaoshanqu），只能解析获得。
+    """
+    s = new_session()
+    html = get_html(s, f"https://{city_slug}.zu.ke.com/zufang/", mark="content__list")
+    return _parse_district_nav(html) if html else {}
 
 
 def match_district(name: str, all_d: dict) -> str:

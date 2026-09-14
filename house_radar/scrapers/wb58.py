@@ -45,6 +45,15 @@ class WB58Scraper:
         url = f"https://{city_slug}.58.com/chuzu/"
         html = get_html(s, url, mark="chuzu")
         items = _parse_listing_page(html, url) if html else []
+        # 区分"无数据"与"IP 反爬验证墙"（58 会 302 到 callback.58.com/antibot）
+        blocked = False
+        if not items:
+            try:
+                probe = s.get(url, timeout=15, allow_redirects=True)
+                if "antibot" in str(probe.url) or "访问过于频繁" in probe.text:
+                    blocked = True
+            except Exception:
+                pass
         # 本地过滤价格（58 匿名无法 URL 筛选）
         pmin, pmax = kw.get("price_min", 0), kw.get("price_max", 0)
         if pmin or pmax:
@@ -53,6 +62,9 @@ class WB58Scraper:
         rt = kw.get("rent_type", "")
         if rt:
             items = [x for x in items if rt in x.title or rt in x.rent_type]
+        msg = ""
+        if not items:
+            msg = ("58同城 IP 反爬验证（需换 IP/代理），已跳过该源" if blocked
+                   else "58同城未返回可用数据（可能无相关房源或被限流）")
         return ScrapeResult(city=city_slug, platform=self.name, listings=items,
-                            ok=len(items) > 0,
-                            message="" if items else "58同城未返回可用数据（可能无相关房源或被限流）")
+                            ok=len(items) > 0, blocked=blocked, message=msg)

@@ -54,7 +54,7 @@ def run(city, price_min=0, price_max=0, districts=None, rent_type="",
         if not quiet:
             print(msg, flush=True)
 
-    all_l, source_stats, failed = [], {}, []
+    all_l, source_stats, failed, blocked_names = [], {}, [], []
     scrapers = [
         ("房天下", FangScraper(cookie=fang_cookie), dict(max_pages=max_pages, owner_only=owner_only)),
         ("贝壳", BeikeScraper(cookie=cookie), dict(max_pages=3 if cookie else 1)),
@@ -73,16 +73,24 @@ def run(city, price_min=0, price_max=0, districts=None, rent_type="",
             continue
         dt = time.time() - t0
         if r.ok and r.listings:
-            source_stats[name] = len(r.listings)
             all_l.extend(r.listings)
             log(f"  ✓ {name} {len(r.listings)} 条（{dt:.1f}s）" + (f"｜{r.message}" if r.message else ""))
         else:
             failed.append(name)
+            if getattr(r, "blocked", False):
+                blocked_names.append(name)
             log(f"  ✗ {name}: {r.message or '无数据'}")
         time.sleep(1.0)
 
     if not all_l:
-        raise SystemExit("所有数据源都没有返回结果。建议：①放宽价格区间 ②换个区域 ③提供贝壳 Cookie 解锁全量。")
+        tips = ["放宽价格区间", "换个区域再试"]
+        if "房天下" in blocked_names:
+            tips.append("浏览器打开 zu.fang.com 人工拖过滑块，F12 复制 Cookie 后加 --fang-cookie")
+        if "贝壳" in blocked_names and not cookie:
+            tips.append("贝壳需登录态：加 --cookie 或扫码登录后提取")
+        if blocked_names:
+            tips.append("IP 被平台限流时加 --proxy http://127.0.0.1:端口 换出口")
+        raise SystemExit(f"所有数据源都没有返回结果。建议：{'；'.join(tips)}。")
 
     # 本地兜底过滤：匿名抓的多是全城流，价格/整租合租/区域统一本地筛
     if price_min:

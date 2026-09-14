@@ -111,7 +111,8 @@ def main():
             print(f"  {i}. [{x.score['total']}分] {x.price}元/月 {x.title[:34]}")
             print(f"     {x.url}")
     if args.open:
-        webbrowser.open("file://" + out_path.replace("\\", "/"))
+        import pathlib
+        webbrowser.open(pathlib.Path(out_path).absolute().as_uri())
 
 
 if __name__ == "__main__":
