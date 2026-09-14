@@ -61,7 +61,7 @@ def _value_score(ratio):
     if ratio < 0.80:
         return 80, ["低于市场均价约2~3成"]
     if ratio <= 1.05:
-        return 100, [] if ratio < 0.95 else []
+        return 100, []
     if ratio <= 1.20:
         return 85, []
     if ratio <= 1.35:

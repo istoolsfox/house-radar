@@ -77,8 +77,9 @@ def main():
             ap.error("非交互环境请使用参数模式，如：python cli.py -c 成都 -p 800 2500")
         _wizard(args)
 
-    pmin = args.price[0] if args.price else 0
-    pmax = args.price[1] if args.price and len(args.price) > 1 else (args.price[0] if args.price else 0)
+    # 与交互向导一致：单值视为价格上限（-p 2500 = 2500 以内），两值为区间
+    pmin = args.price[0] if args.price and len(args.price) > 1 else 0
+    pmax = args.price[-1] if args.price else 0
 
     out_path, listings, stats = run(
         args.city, price_min=pmin, price_max=pmax,

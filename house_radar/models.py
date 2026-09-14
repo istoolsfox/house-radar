@@ -50,3 +50,4 @@ class ScrapeResult:
     total_on_site: int = 0        # 平台显示的命中总数
     ok: bool = True
     message: str = ""
+    blocked: bool = False         # 是否被反爬验证墙拦截（限流，稍后可重试）

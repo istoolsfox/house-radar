@@ -74,7 +74,7 @@ def run(city, price_min=0, price_max=0, districts=None, rent_type="",
         if r.ok and r.listings:
             source_stats[name] = len(r.listings)
             all_l.extend(r.listings)
-            log(f"  ✓ {name} {len(r.listings)} 条（{dt:.1f}s）")
+            log(f"  ✓ {name} {len(r.listings)} 条（{dt:.1f}s）" + (f"｜{r.message}" if r.message else ""))
         else:
             failed.append(name)
             log(f"  ✗ {name}: {r.message or '无数据'}")
@@ -83,15 +83,24 @@ def run(city, price_min=0, price_max=0, districts=None, rent_type="",
     if not all_l:
         raise SystemExit("所有数据源都没有返回结果。建议：①放宽价格区间 ②换个区域 ③提供贝壳 Cookie 解锁全量。")
 
-    # URL 筛选兜底：房天下靠 URL 精筛，贝壳/58/安居客匿名抓的是全城流，统一本地过滤
+    # 本地兜底过滤：匿名抓的多是全城流，价格/整租合租/区域统一本地筛
     if price_min:
         all_l = [x for x in all_l if x.price >= price_min]
     if price_max:
         all_l = [x for x in all_l if x.price <= price_max]
     if rent_type:
         all_l = [x for x in all_l if rent_type in (x.rent_type or "") or rent_type in x.title]
+    if districts:
+        def _in_target(x):
+            loc = (x.district or "") + (x.bizarea or "") + (x.community or "")
+            return any(d and (d in loc or (x.district and x.district in d))
+                       for d in districts)
+        all_l = [x for x in all_l if _in_target(x)]
     if not all_l:
-        raise SystemExit(f"过滤后无房源（区间 {price_min}~{price_max}）。可放宽价格或更换区域再试。")
+        tip = f"区间 {price_min}~{price_max}" if price_min or price_max else "当前筛选"
+        if districts:
+            tip += f" / 区域 {'、'.join(districts)}"
+        raise SystemExit(f"过滤后无房源（{tip}）。可放宽价格或更换区域再试。")
 
     n0 = len(all_l)
     all_l = _dedup(all_l)

@@ -22,6 +22,22 @@ CITY_SLUG = {
     "烟台": "yt", "潍坊": "wf", "洛阳": "ly", "惠州大亚湾": "hzz",
 }
 
+# 全拼 -> slug（用户习惯输 chengdu 而非 cd）
+CITY_PINYIN = {
+    "beijing": "bj", "shanghai": "sh", "guangzhou": "gz", "shenzhen": "sz",
+    "chengdu": "cd", "hangzhou": "hz", "chongqing": "cq", "wuhan": "wh",
+    "xian": "xa", "suzhou": "su", "nanjing": "nj", "tianjin": "tj",
+    "zhengzhou": "zz", "changsha": "cs", "dongguan": "dg", "foshan": "fs",
+    "hefei": "hf", "qingdao": "qd", "xiamen": "xm", "fuzhou": "fz",
+    "kunming": "km", "dalian": "dl", "ningbo": "nb", "jinan": "jn",
+    "shenyang": "sy", "haerbin": "hrb", "harbin": "hrb", "shijiazhuang": "sjz",
+    "taiyuan": "ty", "nanchang": "nc", "nanning": "nn", "guiyang": "gy",
+    "lanzhou": "lz", "haikou": "hk", "sanya": "sy2", "wuxi": "wx",
+    "changzhou": "cz", "zhuhai": "zh", "zhongshan": "zs", "huizhou": "huizhou",
+    "shaoxing": "sx", "jiaxing": "jx", "quanzhou": "qz", "wenzhou": "wz",
+    "jinhua": "jh", "yantai": "yt", "weifang": "wf", "luoyang": "ly",
+}
+
 # 拼音 slug -> 中文名（反向，用于输入识别）
 SLUG_CITY = {v: k for k, v in CITY_SLUG.items()}
 
@@ -29,16 +45,14 @@ SUPPORTED_CITIES = sorted(CITY_SLUG.keys())
 
 
 def resolve_city(text: str) -> str:
-    """把用户输入（中文/拼音/英文）解析成拼音 slug，失败返回空串。"""
+    """把用户输入（中文/拼音缩写/全拼）解析成拼音 slug，失败返回空串。"""
     t = text.strip().lower()
     if not t:
         return ""
     if t in CITY_SLUG:
         return CITY_SLUG[t]
+    if t in CITY_PINYIN:
+        return CITY_PINYIN[t]
     if t in SLUG_CITY:
         return t
-    # 前缀匹配拼音，如 "cd" -> cd 已在上面命中；"chengdu" 不在表里则模糊匹配
-    for slug, city in SLUG_CITY.items():
-        if slug == t or city.lower() == t:
-            return slug
     return ""

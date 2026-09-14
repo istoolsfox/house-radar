@@ -18,7 +18,6 @@ def _parse_listing_page(html: str, base: str) -> list:
         if url in seen:
             continue
         seen.add(url)
-        seg_all = html  # 58 结构多变，用全局兜底提取
         m_title = re.search(r'title="([^"]{8,80})"', seg)
         title = clean_ws(m_title.group(1)) if m_title else ""
         if not title:

@@ -112,17 +112,16 @@ class BeikeScraper:
             s.cookies.update(_parse_cookie_string(self.cookie))
         base = f"https://{city_slug}.zu.ke.com"
 
-        # 贝壳筛选路径需登录；带 cookie 时走 rs 区名搜索，失败退化首页
+        # 匿名仅首页可用；带 cookie 走 rs 区名搜索 + brp/erp 价格筛选，均可 /pg{n}/ 翻页
+        q = []
+        if price_min:
+            q.append(f"brp={price_min}")
+        if price_max:
+            q.append(f"erp={price_max}")
+        qs = ("?" + "&".join(q)) if q else ""
         if self.cookie:
-            for d in (districts or []):
-                urls.append(f"{base}/zufang/rs{d}/")
-            if not districts:
-                q = []
-                if price_min: q.append(f"brp={price_min}")
-                if price_max: q.append(f"erp={price_max}")
-                urls.append(f"{base}/zufang/" + ("?" + "&".join(q) if q else ""))
-            if len(urls) == 1:
-                urls = [urls[0]]  # 首个来源
+            urls = [f"{base}/zufang/rs{d}/{qs}" for d in (districts or [])] \
+                or [f"{base}/zufang/{qs}"]
         else:
             urls = [f"{base}/zufang/"]
 
